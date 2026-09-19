@@ -1,8 +1,9 @@
-"""循环租用资产履约的基础运行入口。"""
+"""循环租用资产履约后端：健康探针与领域 API 入口。"""
 
 import argparse
-import json
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from rental.api import make_handler
+from rental.engine import Engine
 
 SERVICE_ID = "circular-rental"
 SERVICE_NAME = "循环租用资产履约"
@@ -13,22 +14,8 @@ def health_payload():
     return {"status": "ok", "service": SERVICE_ID, "name": SERVICE_NAME}
 
 
-class Handler(BaseHTTPRequestHandler):
-    """响应健康端点。"""
-
-    def do_GET(self):
-        if self.path != "/health":
-            self.send_error(404)
-            return
-        body = json.dumps(health_payload(), ensure_ascii=False).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *_args):
-        return
+_engine = Engine()
+Handler = make_handler(_engine, health_payload)
 
 
 def main():
@@ -38,8 +25,22 @@ def main():
     args = parser.parse_args()
     if args.check:
         assert health_payload()["name"] == SERVICE_NAME
+        probe = Engine()
+        probe.execute(
+            "register_asset",
+            {
+                "serial_no": "SN-CHECK",
+                "model": "probe",
+                "category": "camera",
+                "owner_id": "self",
+                "at": "2026-01-01T00:00:00Z",
+            },
+        )
+        assert probe.query("verify_replay")["converged"]
         print("基础检查通过")
         return
+    from http.server import ThreadingHTTPServer
+
     ThreadingHTTPServer(("0.0.0.0", args.port), Handler).serve_forever()
 
 
